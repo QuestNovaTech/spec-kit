@@ -1,9 +1,9 @@
 ---
-description: Generate an actionable, dependency-ordered tasks.md for the feature based on available design artifacts.
-handoffs: 
-  - label: Analyze For Consistency
-    agent: speckit.analyze
-    prompt: Run a project analysis for consistency
+description: Generate an actionable, dependency-ordered tasks.md for the feature based on available design artifacts. Includes automatic format validation.
+handoffs:
+  - label: Create Checklist
+    agent: speckit.checklist
+    prompt: Create a checklist for the following domain...
     send: true
   - label: Implement Project
     agent: speckit.implement
@@ -51,7 +51,7 @@ You **MUST** consider the user input before proceeding (if not empty).
     **Automatic Pre-Hook**: {extension}
     Executing: `/{command}`
     EXECUTE_COMMAND: {command}
-    
+
     Wait for the result of the hook command before proceeding to the Outline.
     ```
 - If no hooks are registered or `.specify/extensions.yml` does not exist, skip silently
@@ -89,6 +89,28 @@ You **MUST** consider the user input before proceeding (if not empty).
    - Dependencies section showing story completion order
    - Parallel execution examples per story
    - Implementation strategy section (MVP first, incremental delivery)
+
+5. **Format Validation** (NEW in v1.5.0):
+
+   After generating tasks.md, run an automatic format validation pass:
+
+   | Check | Rule | Severity |
+   |-------|------|----------|
+   | Task ID | Every task line must start with `- [ ] T###` or `- [x] T###` | ERROR |
+   | Checkbox | Every task must have a markdown checkbox `- [ ]` or `- [x]` | ERROR |
+   | Story label | User story tasks must include `[US#]` label | WARNING |
+   | Parallel marker | `[P]` must appear before `[US#]` if both present | WARNING |
+   | File path | Description should contain at least one file path (e.g., `src/...`, `tests/...`) | WARNING |
+   | Sequential IDs | Task IDs must be sequential (T001, T002, T003...) with no gaps | WARNING |
+
+   **Validation Report**:
+   - Output a summary table of all violations found
+   - If ERROR-level violations exist: **STOP** and auto-fix before proceeding
+   - If only WARNING-level violations exist: Report them but allow continuation
+   - Auto-fix rules:
+     - Missing Task ID: Assign next sequential ID
+     - Missing checkbox: Prepend `- [ ] `
+     - Missing story label on user story tasks: Infer from phase heading and add `[US#]`
 
 ## Mandatory Post-Execution Hooks
 
@@ -131,7 +153,7 @@ Output path to generated tasks.md and summary:
 - Parallel opportunities identified
 - Independent test criteria for each story
 - Suggested MVP scope (typically just User Story 1)
-- Format validation: Confirm ALL tasks follow the checklist format (checkbox, ID, labels, file paths)
+- **Format validation results**: Pass/fail status with any auto-fixes applied
 
 Context for task generation: {ARGS}
 
@@ -148,7 +170,7 @@ The tasks.md should be immediately executable - each task must be specific enoug
 Every task MUST strictly follow this format:
 
 ```text
-- [ ] [TaskID] [P?] [Story?] Description with file path
+- [ ] T### [P?] [Story?] Description with file path
 ```
 
 **Format Components**:
@@ -159,7 +181,7 @@ Every task MUST strictly follow this format:
 4. **[Story] label**: REQUIRED for user story phase tasks only
    - Format: [US1], [US2], [US3], etc. (maps to user stories from spec.md)
    - Setup phase: NO story label
-   - Foundational phase: NO story label  
+   - Foundational phase: NO story label
    - User Story phases: MUST have story label
    - Polish phase: NO story label
 5. **Description**: Clear action with exact file path
@@ -212,5 +234,6 @@ Every task MUST strictly follow this format:
 ## Done When
 
 - [ ] tasks.md generated with all phases, task IDs, and file paths
+- [ ] Format validation passed (all ERROR-level checks resolved)
 - [ ] Extension hooks dispatched or skipped according to the rules in Mandatory Post-Execution Hooks above
-- [ ] Completion reported to user with task count, story breakdown, and MVP scope
+- [ ] Completion reported to user with task count, story breakdown, MVP scope, and validation results

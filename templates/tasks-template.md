@@ -26,6 +26,16 @@ description: "Task list template for feature implementation"
 - **Mobile**: `api/src/`, `ios/src/` or `android/src/`
 - Paths shown below assume single project - adjust based on plan.md structure
 
+## Format Validation
+
+<!--
+  AUTO-CHECKED by speckit.tasks. All tasks MUST conform to:
+  - [ ] T### [P?] [US#?] Description with file path
+  - ERROR if missing Task ID or checkbox
+  - WARNING if missing [US#] on user story tasks
+  - WARNING if missing file path in description
+-->
+
 <!--
   ============================================================================
   IMPORTANT: The tasks below are SAMPLE TASKS for illustration purposes only.

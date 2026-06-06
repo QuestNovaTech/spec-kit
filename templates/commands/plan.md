@@ -1,13 +1,14 @@
 ---
-description: Execute the implementation planning workflow using the plan template to generate design artifacts.
-handoffs: 
+description: Execute the implementation planning workflow using the plan template to generate design artifacts. Phase 0/1 are now optional based on complexity assessment.
+handoffs:
+  - label: Analyze Spec-Plan Consistency
+    agent: speckit.analyze
+    prompt: Run cross-artifact consistency analysis between spec and plan
+    send: true
   - label: Create Tasks
     agent: speckit.tasks
     prompt: Break the plan into tasks
     send: true
-  - label: Create Checklist
-    agent: speckit.checklist
-    prompt: Create a checklist for the following domain...
 scripts:
   sh: scripts/bash/setup-plan.sh --json
   ps: scripts/powershell/setup-plan.ps1 -Json
@@ -61,14 +62,45 @@ You **MUST** consider the user input before proceeding (if not empty).
 
 2. **Load context**: Read FEATURE_SPEC and `/memory/constitution.md`. Load IMPL_PLAN template (already copied).
 
-3. **Execute plan workflow**: Follow the structure in IMPL_PLAN template to:
-   - Fill Technical Context (mark unknowns as "NEEDS CLARIFICATION")
-   - Fill Constitution Check section from constitution
-   - Evaluate gates (ERROR if violations unjustified)
-   - Phase 0: Generate research.md (resolve all NEEDS CLARIFICATION)
-   - Phase 1: Generate data-model.md, contracts/, quickstart.md
+3. **Complexity Assessment** (NEW in v1.5.0):
+
+   Before generating artifacts, assess the feature complexity to determine which planning phases are needed:
+
+   | Indicator | Weight | Threshold |
+   |-----------|--------|-----------|
+   | New data model / entities | +2 | |
+   | External API / service integration | +2 | |
+   | New interface contracts (API, CLI, UI) | +2 | |
+   | Cross-cutting architectural change | +2 | |
+   | Security or compliance implications | +2 | |
+   | Performance or scalability requirements | +1 | |
+   | UI-only change (no new data/contract) | -1 | |
+   | Bug fix / refactor (no new behavior) | -1 | |
+   | Well-understood domain (CRUD, standard patterns) | -1 | |
+
+   **Scoring**:
+   - **Score >= 4**: Full plan — Phase 0 (Research) + Phase 1 (Design & Contracts) + Phase 2 (Task-Ready Plan)
+   - **Score 1-3**: Standard plan — Phase 1 (Design & Contracts, lightweight) + Phase 2
+   - **Score <= 0**: Minimal plan — Skip Phase 0 and Phase 1 artifacts; generate only `plan.md` with Technical Context + Constitution Check + Project Structure
+
+   **User override**: If user explicitly requests `--full-plan` or `--minimal-plan`, respect the override.
+
+4. **Execute plan workflow** based on complexity level:
+
+   - **Fill Technical Context** (mark unknowns as "NEEDS CLARIFICATION")
+   - **Fill Constitution Check section** from constitution
+   - **Evaluate gates** (ERROR if violations unjustified)
+
+   **If Full or Standard plan**:
+   - Phase 0: Generate `research.md` (resolve all NEEDS CLARIFICATION)
+   - Phase 1: Generate `data-model.md`, `contracts/`, `quickstart.md`
    - Phase 1: Update agent context by running the agent script
    - Re-evaluate Constitution Check post-design
+
+   **If Minimal plan**:
+   - Skip Phase 0 and Phase 1 artifact generation
+   - Document assumptions directly in plan.md Technical Context
+   - Proceed directly to Phase 2 structure
 
 ## Mandatory Post-Execution Hooks
 
@@ -105,11 +137,14 @@ Check if `.specify/extensions.yml` exists in the project root.
 
 ## Completion Report
 
-Command ends after Phase 2 planning. Report branch, IMPL_PLAN path, and generated artifacts.
+Command ends after Phase 2 planning. Report:
+- Complexity score and plan level (Full / Standard / Minimal)
+- Branch, IMPL_PLAN path, and generated artifacts
+- If Minimal plan: explicitly note which artifacts were skipped and why
 
 ## Phases
 
-### Phase 0: Outline & Research
+### Phase 0: Outline & Research (Optional — Full plan only)
 
 1. **Extract unknowns from Technical Context** above:
    - For each NEEDS CLARIFICATION → research task
@@ -132,9 +167,9 @@ Command ends after Phase 2 planning. Report branch, IMPL_PLAN path, and generate
 
 **Output**: research.md with all NEEDS CLARIFICATION resolved
 
-### Phase 1: Design & Contracts
+### Phase 1: Design & Contracts (Optional — Full/Standard plan)
 
-**Prerequisites:** `research.md` complete
+**Prerequisites:** `research.md` complete (if Phase 0 ran)
 
 1. **Extract entities from feature spec** → `data-model.md`:
    - Entity name, fields, relationships
@@ -163,9 +198,11 @@ Command ends after Phase 2 planning. Report branch, IMPL_PLAN path, and generate
 
 - Use absolute paths for filesystem operations; use project-relative paths for references in documentation and agent context files
 - ERROR on gate failures or unresolved clarifications
+- Minimal plan is the default for UI-only changes, bug fixes, and well-understood patterns
 
 ## Done When
 
-- [ ] Plan workflow executed and design artifacts generated
+- [ ] Plan workflow executed and design artifacts generated (according to complexity level)
+- [ ] Complexity assessment documented in plan.md
 - [ ] Extension hooks dispatched or skipped according to the rules in Mandatory Post-Execution Hooks above
-- [ ] Completion reported to user with branch, plan path, and generated artifacts
+- [ ] Completion reported to user with branch, plan path, complexity level, and generated artifacts

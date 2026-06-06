@@ -1,6 +1,6 @@
 ---
 description: Create or update the project constitution from interactive or provided principle inputs, ensuring all dependent templates stay in sync.
-handoffs: 
+handoffs:
   - label: Build Specification
     agent: speckit.specify
     prompt: Implement the feature specification based on the updated constitution. I want to build...
@@ -103,6 +103,9 @@ Follow this execution flow:
    - New version and bump rationale.
    - Any files flagged for manual follow-up.
    - Suggested commit message (e.g., `docs: amend constitution to vX.Y.Z (principle additions + governance update)`).
+
+**NEW in v1.5.0**: After updating the constitution, recommend running `speckit.sync` to auto-validate template alignment:
+   - Suggest: "Run `__SPECKIT_COMMAND_SYNC__` to verify all templates are aligned with the updated constitution."
 
 Formatting & Style Requirements:
 
