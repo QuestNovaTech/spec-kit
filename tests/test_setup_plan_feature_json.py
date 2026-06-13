@@ -1,6 +1,5 @@
-"""Tests for setup-plan bypassing branch-pattern checks when feature.json is valid."""
+"""Tests for setup-plan with ARGUMENT-based feature directory resolution."""
 
-import json
 import os
 import shutil
 import subprocess
@@ -42,13 +41,7 @@ def _minimal_templates(repo: Path) -> None:
 
 
 def _clean_env() -> dict[str, str]:
-    """Return a copy of the current environment with any SPECIFY_* vars removed.
-
-    setup-plan.{sh,ps1} honors SPECIFY_FEATURE, SPECIFY_FEATURE_DIRECTORY, etc.,
-    which would otherwise leak from a developer shell or CI runner and make these
-    tests flaky. Stripping them forces every case to rely purely on git branch +
-    .specify/feature.json state set up by the fixture.
-    """
+    """Return a copy of the current environment with any SPECIFY_* vars removed."""
     env = os.environ.copy()
     for key in list(env):
         if key.startswith("SPECIFY_"):
@@ -80,19 +73,32 @@ def plan_repo(tmp_path: Path) -> Path:
 
 
 @requires_bash
-def test_setup_plan_passes_custom_branch_when_feature_json_valid(plan_repo: Path) -> None:
-    subprocess.run(
-        ["git", "checkout", "-q", "-b", "feature/my-feature-branch"],
-        cwd=plan_repo,
-        check=True,
-    )
-    feat = plan_repo / "specs" / "001-tiny-notes-app"
+def test_setup_plan_uses_env_var(plan_repo: Path) -> None:
+    """When SPECIFY_FEATURE_DIRECTORY is set, use it directly."""
+    feat = plan_repo / "specs" / "my-custom-feature"
     feat.mkdir(parents=True)
     (feat / "spec.md").write_text("# spec\n", encoding="utf-8")
-    (plan_repo / ".specify" / "feature.json").write_text(
-        json.dumps({"feature_directory": "specs/001-tiny-notes-app"}),
-        encoding="utf-8",
+    script = plan_repo / ".specify" / "scripts" / "bash" / "setup-plan.sh"
+    env = _clean_env()
+    env["SPECIFY_FEATURE_DIRECTORY"] = str(feat)
+    result = subprocess.run(
+        ["bash", str(script)],
+        cwd=plan_repo,
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
     )
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert (feat / "plan.md").is_file()
+
+
+@requires_bash
+def test_setup_plan_uses_default_current_feature(plan_repo: Path) -> None:
+    """When no env var or argument, default to specs/current-feature."""
+    feat = plan_repo / "specs" / "current-feature"
+    feat.mkdir(parents=True)
+    (feat / "spec.md").write_text("# spec\n", encoding="utf-8")
     script = plan_repo / ".specify" / "scripts" / "bash" / "setup-plan.sh"
     result = subprocess.run(
         ["bash", str(script)],
@@ -107,29 +113,8 @@ def test_setup_plan_passes_custom_branch_when_feature_json_valid(plan_repo: Path
 
 
 @requires_bash
-def test_setup_plan_fails_custom_branch_without_feature_json(plan_repo: Path) -> None:
-    subprocess.run(
-        ["git", "checkout", "-q", "-b", "feature/my-feature-branch"],
-        cwd=plan_repo,
-        check=True,
-    )
-    script = plan_repo / ".specify" / "scripts" / "bash" / "setup-plan.sh"
-    result = subprocess.run(
-        ["bash", str(script)],
-        cwd=plan_repo,
-        capture_output=True,
-        text=True,
-        check=False,
-        env=_clean_env(),
-    )
-    assert result.returncode != 0
-    assert "Not on a feature branch" in result.stderr
-
-
-@requires_bash
-def test_setup_plan_numbered_branch_unchanged_without_feature_json(
-    plan_repo: Path,
-) -> None:
+def test_setup_plan_uses_branch_prefix_lookup(plan_repo: Path) -> None:
+    """When no env var and no current-feature, fall back to branch prefix lookup."""
     subprocess.run(
         ["git", "checkout", "-q", "-b", "001-tiny-notes-app"],
         cwd=plan_repo,
@@ -152,19 +137,33 @@ def test_setup_plan_numbered_branch_unchanged_without_feature_json(
 
 
 @pytest.mark.skipif(not (HAS_PWSH or _POWERSHELL), reason="no PowerShell available")
-def test_setup_plan_ps_passes_custom_branch_when_feature_json_valid(plan_repo: Path) -> None:
-    subprocess.run(
-        ["git", "checkout", "-q", "-b", "feature/my-feature-branch"],
-        cwd=plan_repo,
-        check=True,
-    )
-    feat = plan_repo / "specs" / "001-tiny-notes-app"
+def test_setup_plan_ps_uses_env_var(plan_repo: Path) -> None:
+    """PowerShell: When SPECIFY_FEATURE_DIRECTORY is set, use it directly."""
+    feat = plan_repo / "specs" / "my-custom-feature"
     feat.mkdir(parents=True)
     (feat / "spec.md").write_text("# spec\n", encoding="utf-8")
-    (plan_repo / ".specify" / "feature.json").write_text(
-        json.dumps({"feature_directory": "specs/001-tiny-notes-app"}),
-        encoding="utf-8",
+    script = plan_repo / ".specify" / "scripts" / "powershell" / "setup-plan.ps1"
+    exe = "pwsh" if HAS_PWSH else _POWERSHELL
+    env = _clean_env()
+    env["SPECIFY_FEATURE_DIRECTORY"] = str(feat)
+    result = subprocess.run(
+        [exe, "-NoProfile", "-File", str(script)],
+        cwd=plan_repo,
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
     )
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert (feat / "plan.md").is_file()
+
+
+@pytest.mark.skipif(not (HAS_PWSH or _POWERSHELL), reason="no PowerShell available")
+def test_setup_plan_ps_uses_default_current_feature(plan_repo: Path) -> None:
+    """PowerShell: When no env var, default to specs/current-feature."""
+    feat = plan_repo / "specs" / "current-feature"
+    feat.mkdir(parents=True)
+    (feat / "spec.md").write_text("# spec\n", encoding="utf-8")
     script = plan_repo / ".specify" / "scripts" / "powershell" / "setup-plan.ps1"
     exe = "pwsh" if HAS_PWSH else _POWERSHELL
     result = subprocess.run(
@@ -177,26 +176,3 @@ def test_setup_plan_ps_passes_custom_branch_when_feature_json_valid(plan_repo: P
     )
     assert result.returncode == 0, result.stderr + result.stdout
     assert (feat / "plan.md").is_file()
-
-
-@pytest.mark.skipif(not (HAS_PWSH or _POWERSHELL), reason="no PowerShell available")
-def test_setup_plan_ps_fails_custom_branch_without_feature_json(
-    plan_repo: Path,
-) -> None:
-    subprocess.run(
-        ["git", "checkout", "-q", "-b", "feature/my-feature-branch"],
-        cwd=plan_repo,
-        check=True,
-    )
-    script = plan_repo / ".specify" / "scripts" / "powershell" / "setup-plan.ps1"
-    exe = "pwsh" if HAS_PWSH else _POWERSHELL
-    result = subprocess.run(
-        [exe, "-NoProfile", "-File", str(script)],
-        cwd=plan_repo,
-        capture_output=True,
-        text=True,
-        check=False,
-        env=_clean_env(),
-    )
-    assert result.returncode != 0
-    assert "Not on a feature branch" in result.stderr

@@ -67,97 +67,6 @@ function Get-HighestNumberFromSpecs {
     return $highest
 }
 
-# Extract the highest sequential feature number from a list of branch/ref names.
-# Shared by Get-HighestNumberFromBranches and Get-HighestNumberFromRemoteRefs.
-function Get-HighestNumberFromNames {
-    param([string[]]$Names)
-
-    [long]$highest = 0
-    foreach ($name in $Names) {
-        if ($name -match '^(\d{3,})-' -and $name -notmatch '^\d{8}-\d{6}-') {
-            [long]$num = 0
-            if ([long]::TryParse($matches[1], [ref]$num) -and $num -gt $highest) {
-                $highest = $num
-            }
-        }
-    }
-    return $highest
-}
-
-function Get-HighestNumberFromBranches {
-    param()
-
-    try {
-        $branches = git branch -a 2>$null
-        if ($LASTEXITCODE -eq 0 -and $branches) {
-            $cleanNames = $branches | ForEach-Object {
-                $_.Trim() -replace '^\*?\s+', '' -replace '^remotes/[^/]+/', ''
-            }
-            return Get-HighestNumberFromNames -Names $cleanNames
-        }
-    } catch {
-        Write-Verbose "Could not check Git branches: $_"
-    }
-    return 0
-}
-
-function Get-HighestNumberFromRemoteRefs {
-    [long]$highest = 0
-    try {
-        $remotes = git remote 2>$null
-        if ($remotes) {
-            foreach ($remote in $remotes) {
-                $env:GIT_TERMINAL_PROMPT = '0'
-                $refs = git ls-remote --heads $remote 2>$null
-                $env:GIT_TERMINAL_PROMPT = $null
-                if ($LASTEXITCODE -eq 0 -and $refs) {
-                    $refNames = $refs | ForEach-Object {
-                        if ($_ -match 'refs/heads/(.+)$') { $matches[1] }
-                    } | Where-Object { $_ }
-                    $remoteHighest = Get-HighestNumberFromNames -Names $refNames
-                    if ($remoteHighest -gt $highest) { $highest = $remoteHighest }
-                }
-            }
-        }
-    } catch {
-        Write-Verbose "Could not query remote refs: $_"
-    }
-    return $highest
-}
-
-# Return next available branch number. When SkipFetch is true, queries remotes
-# via ls-remote (read-only) instead of fetching.
-function Get-NextBranchNumber {
-    param(
-        [string]$SpecsDir,
-        [switch]$SkipFetch
-    )
-
-    if ($SkipFetch) {
-        # Side-effect-free: query remotes via ls-remote
-        $highestBranch = Get-HighestNumberFromBranches
-        $highestRemote = Get-HighestNumberFromRemoteRefs
-        $highestBranch = [Math]::Max($highestBranch, $highestRemote)
-    } else {
-        # Fetch all remotes to get latest branch info (suppress errors if no remotes)
-        try {
-            git fetch --all --prune 2>$null | Out-Null
-        } catch {
-            # Ignore fetch errors
-        }
-        $highestBranch = Get-HighestNumberFromBranches
-    }
-
-    # Get highest number from ALL specs (not just matching short name)
-    $highestSpec = Get-HighestNumberFromSpecs -SpecsDir $SpecsDir
-
-    # Take the maximum of both
-    $maxNum = [Math]::Max($highestBranch, $highestSpec)
-
-    # Return next number
-    return $maxNum + 1
-}
-
 function ConvertTo-CleanBranchName {
     param([string]$Name)
 
@@ -246,19 +155,7 @@ if ($Timestamp) {
 } else {
     # Determine branch number
     if ($Number -eq 0) {
-        if ($DryRun -and $hasGit) {
-            # Dry-run: query remotes via ls-remote (side-effect-free, no fetch)
-            $Number = Get-NextBranchNumber -SpecsDir $specsDir -SkipFetch
-        } elseif ($DryRun) {
-            # Dry-run without git: local spec dirs only
-            $Number = (Get-HighestNumberFromSpecs -SpecsDir $specsDir) + 1
-        } elseif ($hasGit) {
-            # Check existing branches on remotes
-            $Number = Get-NextBranchNumber -SpecsDir $specsDir
-        } else {
-            # Fall back to local directory check
-            $Number = (Get-HighestNumberFromSpecs -SpecsDir $specsDir) + 1
-        }
+        $Number = (Get-HighestNumberFromSpecs -SpecsDir $specsDir) + 1
     }
 
     $featureNum = ('{0:000}' -f $Number)
@@ -292,57 +189,7 @@ $specFile = Join-Path $featureDir 'spec.md'
 
 if (-not $DryRun) {
     if ($hasGit) {
-        $branchCreated = $false
-        $branchCreateError = ''
-        try {
-            $branchCreateError = git checkout -q -b $branchName 2>&1 | Out-String
-            if ($LASTEXITCODE -eq 0) {
-                $branchCreated = $true
-            }
-        } catch {
-            $branchCreateError = $_.Exception.Message
-        }
-
-        if (-not $branchCreated) {
-            $currentBranch = ''
-            try { $currentBranch = (git rev-parse --abbrev-ref HEAD 2>$null).Trim() } catch {}
-            # Check if branch already exists
-            $existingBranch = git branch --list $branchName 2>$null
-            if ($existingBranch) {
-                if ($AllowExistingBranch) {
-                    # If we're already on the branch, continue without another checkout.
-                    if ($currentBranch -eq $branchName) {
-                        # Already on the target branch -- nothing to do
-                    } else {
-                        # Otherwise switch to the existing branch instead of failing.
-                        $switchBranchError = git checkout -q $branchName 2>&1 | Out-String
-                        if ($LASTEXITCODE -ne 0) {
-                            if ($switchBranchError) {
-                                Write-Error "Error: Branch '$branchName' exists but could not be checked out.`n$($switchBranchError.Trim())"
-                            } else {
-                                Write-Error "Error: Branch '$branchName' exists but could not be checked out. Resolve any uncommitted changes or conflicts and try again."
-                            }
-                            exit 1
-                        }
-                    }
-                } elseif ($Timestamp) {
-                    Write-Error "Error: Branch '$branchName' already exists. Rerun to get a new timestamp or use a different -ShortName."
-                    exit 1
-                } else {
-                    Write-Error "Error: Branch '$branchName' already exists. Please use a different feature name or specify a different number with -Number."
-                    exit 1
-                }
-            } else {
-                if ($branchCreateError) {
-                    Write-Error "Error: Failed to create git branch '$branchName'.`n$($branchCreateError.Trim())"
-                } else {
-                    Write-Error "Error: Failed to create git branch '$branchName'. Please check your git configuration and try again."
-                }
-                exit 1
-            }
-        }
-    } else {
-        Write-Warning "[specify] Warning: Git repository not detected; skipped branch creation for $branchName"
+        [Console]::Error.WriteLine("[specify] Warning: Git repository detected; branch creation is no longer handled by this script")
     }
 
     New-Item -ItemType Directory -Path $featureDir -Force | Out-Null

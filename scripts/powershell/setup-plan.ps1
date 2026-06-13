@@ -23,13 +23,6 @@ if ($Help) {
 # Get all paths and variables from common functions
 $paths = Get-FeaturePathsEnv
 
-# If feature.json pins an existing feature directory, branch naming is not required.
-if (-not (Test-FeatureJsonMatchesFeatureDir -RepoRoot $paths.REPO_ROOT -ActiveFeatureDir $paths.FEATURE_DIR)) {
-    if (-not (Test-FeatureBranch -Branch $paths.CURRENT_BRANCH -HasGit $paths.HAS_GIT)) {
-        exit 1
-    }
-}
-
 # Ensure the feature directory exists
 New-Item -ItemType Directory -Path $paths.FEATURE_DIR -Force | Out-Null
 

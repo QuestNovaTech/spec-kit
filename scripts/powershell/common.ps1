@@ -164,74 +164,6 @@ function Test-FeatureBranch {
     return $true
 }
 
-# True when .specify/feature.json pins an existing feature directory that matches the
-# active FEATURE_DIR from Get-FeaturePathsEnv (so __SPECKIT_COMMAND_PLAN__ can skip git branch pattern checks).
-function Test-FeatureJsonMatchesFeatureDir {
-    param(
-        [Parameter(Mandatory = $true)][string]$RepoRoot,
-        [Parameter(Mandatory = $true)][string]$ActiveFeatureDir
-    )
-
-    $featureJson = Join-Path (Join-Path $RepoRoot '.specify') 'feature.json'
-    if (-not (Test-Path -LiteralPath $featureJson -PathType Leaf)) {
-        return $false
-    }
-
-    try {
-        $raw = Get-Content -LiteralPath $featureJson -Raw
-        $cfg = $raw | ConvertFrom-Json
-    } catch {
-        return $false
-    }
-
-    $fd = $cfg.feature_directory
-    if ([string]::IsNullOrWhiteSpace([string]$fd)) {
-        return $false
-    }
-
-    if (-not [System.IO.Path]::IsPathRooted($fd)) {
-        $fd = Join-Path $RepoRoot $fd
-    }
-
-    if (-not (Test-Path -LiteralPath $fd -PathType Container)) {
-        return $false
-    }
-
-    # Resolve both paths to canonical absolute form. Prefer Resolve-Path (follows
-    # symlinks and is the canonical PS way); fall back to [Path]::GetFullPath when
-    # Resolve-Path can't produce a value. Mirrors the pattern used by Find-SpecifyRoot.
-    $resolvedJson = Resolve-Path -LiteralPath $fd -ErrorAction SilentlyContinue
-    if ($resolvedJson) {
-        $normJson = $resolvedJson.Path
-    } else {
-        $normJson = [System.IO.Path]::GetFullPath($fd)
-    }
-
-    $resolvedActive = Resolve-Path -LiteralPath $ActiveFeatureDir -ErrorAction SilentlyContinue
-    if ($resolvedActive) {
-        $normActive = $resolvedActive.Path
-    } else {
-        $normActive = [System.IO.Path]::GetFullPath($ActiveFeatureDir)
-    }
-
-    # Use case-insensitive compare only on Windows; POSIX filesystems are case-sensitive.
-    # PowerShell 5.1 is Windows-only and does not define $IsWindows, so treat its
-    # absence as "we're on Windows".
-    if ($null -ne $IsWindows) {
-        $onWindows = $IsWindows
-    } else {
-        $onWindows = $true
-    }
-
-    if ($onWindows) {
-        $comparison = [System.StringComparison]::OrdinalIgnoreCase
-    } else {
-        $comparison = [System.StringComparison]::Ordinal
-    }
-
-    return [string]::Equals($normJson, $normActive, $comparison)
-}
-
 # Resolve specs/<feature-dir> by numeric/timestamp prefix (mirrors scripts/bash/common.sh find_feature_dir_by_prefix).
 function Find-FeatureDirByPrefix {
     param(
@@ -288,34 +220,21 @@ function Get-FeaturePathsEnv {
 
     # Resolve feature directory.  Priority:
     #   1. SPECIFY_FEATURE_DIRECTORY env var (explicit override)
-    #   2. .specify/feature.json "feature_directory" key (persisted by __SPECKIT_COMMAND_SPECIFY__)
+    #   2. Default `specs/current-feature` (if exists)
     #   3. Branch-name-based prefix lookup (same as scripts/bash/common.sh)
-    $featureJson = Join-Path $repoRoot '.specify/feature.json'
     if ($env:SPECIFY_FEATURE_DIRECTORY) {
         $featureDir = $env:SPECIFY_FEATURE_DIRECTORY
         # Normalize relative paths to absolute under repo root
         if (-not [System.IO.Path]::IsPathRooted($featureDir)) {
             $featureDir = Join-Path $repoRoot $featureDir
         }
-    } elseif (Test-Path $featureJson) {
-        $featureJsonRaw = Get-Content -LiteralPath $featureJson -Raw
-        try {
-            $featureConfig = $featureJsonRaw | ConvertFrom-Json
-        } catch {
-            [Console]::Error.WriteLine("ERROR: Failed to parse .specify/feature.json: $_")
-            exit 1
-        }
-        if ($featureConfig.feature_directory) {
-            $featureDir = $featureConfig.feature_directory
-            # Normalize relative paths to absolute under repo root
-            if (-not [System.IO.Path]::IsPathRooted($featureDir)) {
-                $featureDir = Join-Path $repoRoot $featureDir
-            }
+    } else {
+        $currentFeatureDir = Join-Path $repoRoot 'specs/current-feature'
+        if (Test-Path -LiteralPath $currentFeatureDir -PathType Container) {
+            $featureDir = $currentFeatureDir
         } else {
             $featureDir = Get-FeatureDirFromBranchPrefixOrExit -RepoRoot $repoRoot -CurrentBranch $currentBranch
         }
-    } else {
-        $featureDir = Get-FeatureDirFromBranchPrefixOrExit -RepoRoot $repoRoot -CurrentBranch $currentBranch
     }
     
     [PSCustomObject]@{

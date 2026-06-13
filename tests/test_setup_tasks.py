@@ -533,59 +533,55 @@ def test_check_prerequisites_bash_uses_invoke_separator_in_tasks_hint(
 
 
 @requires_bash
-def test_setup_tasks_bash_passes_custom_branch_when_feature_json_valid(
+def test_setup_tasks_bash_uses_env_var_for_feature_dir(
     tasks_repo: Path,
 ) -> None:
     """
-    On a non-standard branch, setup-tasks.sh must succeed when feature.json
-    pins a valid FEATURE_DIR (branch validation should be skipped).
+    When SPECIFY_FEATURE_DIRECTORY is set, setup-tasks.sh uses it directly
+    regardless of branch name.
     """
     subprocess.run(
         ["git", "checkout", "-q", "-b", "feature/custom-branch"],
         cwd=tasks_repo,
         check=True,
     )
- 
+
     feat = tasks_repo / "specs" / "001-my-feature"
     feat.mkdir(parents=True, exist_ok=True)
     (feat / "spec.md").write_text("# spec\n", encoding="utf-8")
     (feat / "plan.md").write_text("# plan\n", encoding="utf-8")
- 
-    (tasks_repo / ".specify" / "feature.json").write_text(
-        json.dumps({"feature_directory": "specs/001-my-feature"}),
-        encoding="utf-8",
-    )
- 
+
     script = tasks_repo / ".specify" / "scripts" / "bash" / "setup-tasks.sh"
- 
+
+    env = _clean_env()
+    env["SPECIFY_FEATURE_DIRECTORY"] = str(feat)
+
     result = subprocess.run(
         ["bash", str(script), "--json"],
         cwd=tasks_repo,
         capture_output=True,
         text=True,
         check=False,
-        env=_clean_env(),
+        env=env,
     )
- 
+
     assert result.returncode == 0, result.stderr + result.stdout
- 
- 
+
+
 @requires_bash
-def test_setup_tasks_bash_fails_custom_branch_without_feature_json(
+def test_setup_tasks_bash_fails_when_plan_missing(
     tasks_repo: Path,
 ) -> None:
     """
-    On a non-standard branch with no feature.json, setup-tasks.sh must fail
-    and report that we are not on a feature branch.
+    When plan.md is missing, setup-tasks.sh must fail with a clear error.
     """
-    subprocess.run(
-        ["git", "checkout", "-q", "-b", "feature/custom-branch"],
-        cwd=tasks_repo,
-        check=True,
-    )
- 
+    feat = tasks_repo / "specs" / "current-feature"
+    feat.mkdir(parents=True, exist_ok=True)
+    (feat / "spec.md").write_text("# spec\n", encoding="utf-8")
+    # Note: plan.md is intentionally missing
+
     script = tasks_repo / ".specify" / "scripts" / "bash" / "setup-tasks.sh"
- 
+
     result = subprocess.run(
         ["bash", str(script), "--json"],
         cwd=tasks_repo,
@@ -596,8 +592,9 @@ def test_setup_tasks_bash_fails_custom_branch_without_feature_json(
     )
 
     assert result.returncode != 0
-    assert "Not on a feature branch" in result.stderr
- 
+    assert "plan.md not found" in result.stderr
+
+
 # ===========================================================================
 # POWERSHELL TESTS
 # ===========================================================================
@@ -776,61 +773,57 @@ def test_check_prerequisites_ps_uses_invoke_separator_in_tasks_hint(
 
 
 @pytest.mark.skipif(not (HAS_PWSH or _POWERSHELL), reason="no PowerShell available")
-def test_setup_tasks_ps_passes_custom_branch_when_feature_json_valid(
+def test_setup_tasks_ps_uses_env_var_for_feature_dir(
     tasks_repo: Path,
 ) -> None:
     """
-    On a non-standard branch, setup-tasks.ps1 must succeed when feature.json
-    pins a valid FEATURE_DIR (branch validation should be skipped).
+    When SPECIFY_FEATURE_DIRECTORY is set, setup-tasks.ps1 uses it directly
+    regardless of branch name.
     """
     subprocess.run(
         ["git", "checkout", "-q", "-b", "feature/custom-branch"],
         cwd=tasks_repo,
         check=True,
     )
- 
+
     feat = tasks_repo / "specs" / "001-my-feature"
     feat.mkdir(parents=True, exist_ok=True)
     (feat / "spec.md").write_text("# spec\n", encoding="utf-8")
     (feat / "plan.md").write_text("# plan\n", encoding="utf-8")
- 
-    (tasks_repo / ".specify" / "feature.json").write_text(
-        json.dumps({"feature_directory": "specs/001-my-feature"}),
-        encoding="utf-8",
-    )
- 
+
     script = tasks_repo / ".specify" / "scripts" / "powershell" / "setup-tasks.ps1"
     exe = "pwsh" if HAS_PWSH else _POWERSHELL
- 
+
+    env = _clean_env()
+    env["SPECIFY_FEATURE_DIRECTORY"] = str(feat)
+
     result = subprocess.run(
         [exe, "-NoProfile", "-File", str(script), "-Json"],
         cwd=tasks_repo,
         capture_output=True,
         text=True,
         check=False,
-        env=_clean_env(),
+        env=env,
     )
- 
+
     assert result.returncode == 0, result.stderr + result.stdout
- 
- 
+
+
 @pytest.mark.skipif(not (HAS_PWSH or _POWERSHELL), reason="no PowerShell available")
-def test_setup_tasks_ps_fails_custom_branch_without_feature_json(
+def test_setup_tasks_ps_fails_when_plan_missing(
     tasks_repo: Path,
 ) -> None:
     """
-    On a non-standard branch with no feature.json, setup-tasks.ps1 must fail
-    and report that we are not on a feature branch.
+    When plan.md is missing, setup-tasks.ps1 must fail with a clear error.
     """
-    subprocess.run(
-        ["git", "checkout", "-q", "-b", "feature/custom-branch"],
-        cwd=tasks_repo,
-        check=True,
-    )
- 
+    feat = tasks_repo / "specs" / "current-feature"
+    feat.mkdir(parents=True, exist_ok=True)
+    (feat / "spec.md").write_text("# spec\n", encoding="utf-8")
+    # Note: plan.md is intentionally missing
+
     script = tasks_repo / ".specify" / "scripts" / "powershell" / "setup-tasks.ps1"
     exe = "pwsh" if HAS_PWSH else _POWERSHELL
- 
+
     result = subprocess.run(
         [exe, "-NoProfile", "-File", str(script), "-Json"],
         cwd=tasks_repo,
@@ -839,6 +832,6 @@ def test_setup_tasks_ps_fails_custom_branch_without_feature_json(
         check=False,
         env=_clean_env(),
     )
- 
+
     assert result.returncode != 0
-    assert "Not on a feature branch" in result.stderr
+    assert "plan.md not found" in result.stderr

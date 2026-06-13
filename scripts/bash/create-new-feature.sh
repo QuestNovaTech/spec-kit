@@ -113,75 +113,6 @@ get_highest_from_specs() {
     echo "$highest"
 }
 
-# Function to get highest number from git branches
-get_highest_from_branches() {
-    git branch -a 2>/dev/null | sed 's/^[* ]*//; s|^remotes/[^/]*/||' | _extract_highest_number
-}
-
-# Extract the highest sequential feature number from a list of ref names (one per line).
-# Shared by get_highest_from_branches and get_highest_from_remote_refs.
-_extract_highest_number() {
-    local highest=0
-    while IFS= read -r name; do
-        [ -z "$name" ] && continue
-        if echo "$name" | grep -Eq '^[0-9]{3,}-' && ! echo "$name" | grep -Eq '^[0-9]{8}-[0-9]{6}-'; then
-            number=$(echo "$name" | grep -Eo '^[0-9]+' || echo "0")
-            number=$((10#$number))
-            if [ "$number" -gt "$highest" ]; then
-                highest=$number
-            fi
-        fi
-    done
-    echo "$highest"
-}
-
-# Function to get highest number from remote branches without fetching (side-effect-free)
-get_highest_from_remote_refs() {
-    local highest=0
-
-    for remote in $(git remote 2>/dev/null); do
-        local remote_highest
-        remote_highest=$(GIT_TERMINAL_PROMPT=0 git ls-remote --heads "$remote" 2>/dev/null | sed 's|.*refs/heads/||' | _extract_highest_number)
-        if [ "$remote_highest" -gt "$highest" ]; then
-            highest=$remote_highest
-        fi
-    done
-
-    echo "$highest"
-}
-
-# Function to check existing branches (local and remote) and return next available number.
-# When skip_fetch is true, queries remotes via ls-remote (read-only) instead of fetching.
-check_existing_branches() {
-    local specs_dir="$1"
-    local skip_fetch="${2:-false}"
-
-    if [ "$skip_fetch" = true ]; then
-        # Side-effect-free: query remotes via ls-remote
-        local highest_remote=$(get_highest_from_remote_refs)
-        local highest_branch=$(get_highest_from_branches)
-        if [ "$highest_remote" -gt "$highest_branch" ]; then
-            highest_branch=$highest_remote
-        fi
-    else
-        # Fetch all remotes to get latest branch info (suppress errors if no remotes)
-        git fetch --all --prune >/dev/null 2>&1 || true
-        local highest_branch=$(get_highest_from_branches)
-    fi
-
-    # Get highest number from ALL specs (not just matching short name)
-    local highest_spec=$(get_highest_from_specs "$specs_dir")
-
-    # Take the maximum of both
-    local max_num=$highest_branch
-    if [ "$highest_spec" -gt "$max_num" ]; then
-        max_num=$highest_spec
-    fi
-
-    # Return next number
-    echo $((max_num + 1))
-}
-
 # Function to clean and format a branch name
 clean_branch_name() {
     local name="$1"
@@ -278,21 +209,8 @@ if [ "$USE_TIMESTAMP" = true ]; then
 else
     # Determine branch number
     if [ -z "$BRANCH_NUMBER" ]; then
-        if [ "$DRY_RUN" = true ] && [ "$HAS_GIT" = true ]; then
-            # Dry-run: query remotes via ls-remote (side-effect-free, no fetch)
-            BRANCH_NUMBER=$(check_existing_branches "$SPECS_DIR" true)
-        elif [ "$DRY_RUN" = true ]; then
-            # Dry-run without git: local spec dirs only
-            HIGHEST=$(get_highest_from_specs "$SPECS_DIR")
-            BRANCH_NUMBER=$((HIGHEST + 1))
-        elif [ "$HAS_GIT" = true ]; then
-            # Check existing branches on remotes
-            BRANCH_NUMBER=$(check_existing_branches "$SPECS_DIR")
-        else
-            # Fall back to local directory check
-            HIGHEST=$(get_highest_from_specs "$SPECS_DIR")
-            BRANCH_NUMBER=$((HIGHEST + 1))
-        fi
+        HIGHEST=$(get_highest_from_specs "$SPECS_DIR")
+        BRANCH_NUMBER=$((HIGHEST + 1))
     fi
 
     # Force base-10 interpretation to prevent octal conversion (e.g., 010 → 8 in octal, but should be 10 in decimal)
@@ -327,42 +245,7 @@ SPEC_FILE="$FEATURE_DIR/spec.md"
 
 if [ "$DRY_RUN" != true ]; then
     if [ "$HAS_GIT" = true ]; then
-        branch_create_error=""
-        if ! branch_create_error=$(git checkout -q -b "$BRANCH_NAME" 2>&1); then
-            current_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
-            # Check if branch already exists
-            if git branch --list "$BRANCH_NAME" | grep -q .; then
-                if [ "$ALLOW_EXISTING" = true ]; then
-                    # If we're already on the branch, continue without another checkout.
-                    if [ "$current_branch" = "$BRANCH_NAME" ]; then
-                        :
-                    # Otherwise switch to the existing branch instead of failing.
-                    elif ! switch_branch_error=$(git checkout -q "$BRANCH_NAME" 2>&1); then
-                        >&2 echo "Error: Failed to switch to existing branch '$BRANCH_NAME'. Please resolve any local changes or conflicts and try again."
-                        if [ -n "$switch_branch_error" ]; then
-                            >&2 printf '%s\n' "$switch_branch_error"
-                        fi
-                        exit 1
-                    fi
-                elif [ "$USE_TIMESTAMP" = true ]; then
-                    >&2 echo "Error: Branch '$BRANCH_NAME' already exists. Rerun to get a new timestamp or use a different --short-name."
-                    exit 1
-                else
-                    >&2 echo "Error: Branch '$BRANCH_NAME' already exists. Please use a different feature name or specify a different number with --number."
-                    exit 1
-                fi
-            else
-                >&2 echo "Error: Failed to create git branch '$BRANCH_NAME'."
-                if [ -n "$branch_create_error" ]; then
-                    >&2 printf '%s\n' "$branch_create_error"
-                else
-                    >&2 echo "Please check your git configuration and try again."
-                fi
-                exit 1
-            fi
-        fi
-    else
-        >&2 echo "[specify] Warning: Git repository not detected; skipped branch creation for $BRANCH_NAME"
+        >&2 echo "[specify] Warning: Git repository detected; branch creation is no longer handled by this script"
     fi
 
     mkdir -p "$FEATURE_DIR"
@@ -388,25 +271,28 @@ if $JSON_MODE; then
                 --arg branch_name "$BRANCH_NAME" \
                 --arg spec_file "$SPEC_FILE" \
                 --arg feature_num "$FEATURE_NUM" \
-                '{BRANCH_NAME:$branch_name,SPEC_FILE:$spec_file,FEATURE_NUM:$feature_num,DRY_RUN:true}'
+                --arg has_git "$HAS_GIT" \
+                '{BRANCH_NAME:$branch_name,SPEC_FILE:$spec_file,FEATURE_NUM:$feature_num,HAS_GIT:$has_git,DRY_RUN:true}'
         else
             jq -cn \
                 --arg branch_name "$BRANCH_NAME" \
                 --arg spec_file "$SPEC_FILE" \
                 --arg feature_num "$FEATURE_NUM" \
-                '{BRANCH_NAME:$branch_name,SPEC_FILE:$spec_file,FEATURE_NUM:$feature_num}'
+                --arg has_git "$HAS_GIT" \
+                '{BRANCH_NAME:$branch_name,SPEC_FILE:$spec_file,FEATURE_NUM:$feature_num,HAS_GIT:$has_git}'
         fi
     else
         if [ "$DRY_RUN" = true ]; then
-            printf '{"BRANCH_NAME":"%s","SPEC_FILE":"%s","FEATURE_NUM":"%s","DRY_RUN":true}\n' "$(json_escape "$BRANCH_NAME")" "$(json_escape "$SPEC_FILE")" "$(json_escape "$FEATURE_NUM")"
+            printf '{"BRANCH_NAME":"%s","SPEC_FILE":"%s","FEATURE_NUM":"%s","HAS_GIT":%s,"DRY_RUN":true}\n' "$(json_escape "$BRANCH_NAME")" "$(json_escape "$SPEC_FILE")" "$(json_escape "$FEATURE_NUM")" "$HAS_GIT"
         else
-            printf '{"BRANCH_NAME":"%s","SPEC_FILE":"%s","FEATURE_NUM":"%s"}\n' "$(json_escape "$BRANCH_NAME")" "$(json_escape "$SPEC_FILE")" "$(json_escape "$FEATURE_NUM")"
+            printf '{"BRANCH_NAME":"%s","SPEC_FILE":"%s","FEATURE_NUM":"%s","HAS_GIT":%s}\n' "$(json_escape "$BRANCH_NAME")" "$(json_escape "$SPEC_FILE")" "$(json_escape "$FEATURE_NUM")" "$HAS_GIT"
         fi
     fi
 else
     echo "BRANCH_NAME: $BRANCH_NAME"
     echo "SPEC_FILE: $SPEC_FILE"
     echo "FEATURE_NUM: $FEATURE_NUM"
+    echo "HAS_GIT: $HAS_GIT"
     if [ "$DRY_RUN" != true ]; then
         printf '# To persist in your shell: export SPECIFY_FEATURE=%q\n' "$BRANCH_NAME"
     fi

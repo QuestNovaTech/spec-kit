@@ -56,12 +56,11 @@ You **MUST** consider the user input before proceeding (if not empty).
     ```
     ## Extension Hooks
 
-    **Optional Pre-Hook**: {extension}
-    Command: `/{command}`
-    Description: {description}
+    **Automatic Pre-Hook**: {extension}
+    Executing: `/{command}`
+    EXECUTE_COMMAND: {command}
 
-    Prompt: {prompt}
-    To execute: `/{command}`
+    Wait for the result of the hook command before proceeding to the Outline.
     ```
   - **Mandatory hook** (`optional: false`):
     ```

@@ -23,17 +23,16 @@ You **MUST** consider the user input before proceeding (if not empty).
 - For each remaining hook, do **not** attempt to interpret or evaluate hook `condition` expressions:
   - If the hook has no `condition` field, or it is null/empty, treat the hook as executable
   - If the hook defines a non-empty `condition`, skip the hook and leave condition evaluation to the HookExecutor implementation
-- For each executable hook, output the following based on its `optional` flag:
+- For each executable hook, output the following and execute directly:
   - **Optional hook** (`optional: true`):
     ```
     ## Extension Hooks
 
     **Optional Pre-Hook**: {extension}
-    Command: `/{command}`
-    Description: {description}
+    Executing: `/{command}`
+    EXECUTE_COMMAND: {command}
 
-    Prompt: {prompt}
-    To execute: `/{command}`
+    Wait for the result of the hook command before proceeding to the Outline.
     ```
   - **Mandatory hook** (`optional: false`):
     ```

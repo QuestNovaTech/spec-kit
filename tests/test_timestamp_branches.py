@@ -1276,19 +1276,13 @@ class TestFeatureDirectoryResolution:
             pytest.fail("FEATURE_DIR not found in PowerShell output")
 
     @pytest.mark.skipif(not _has_pwsh(), reason="pwsh not installed")
-    def test_ps_feature_json_overrides_branch_lookup(self, git_repo: Path):
-        """PowerShell: feature.json takes priority over branch-based lookup."""
+    def test_ps_env_var_overrides_branch_lookup(self, git_repo: Path):
+        """PowerShell: SPECIFY_FEATURE_DIRECTORY env var takes priority over branch-based lookup."""
         common_ps = PROJECT_ROOT / "scripts" / "powershell" / "common.ps1"
-        custom_dir = git_repo / "specs" / "ps-json-feature"
+        custom_dir = git_repo / "specs" / "ps-env-feature"
         custom_dir.mkdir(parents=True)
 
-        feature_json = git_repo / ".specify" / "feature.json"
-        feature_json.write_text(
-            json.dumps({"feature_directory": str(custom_dir)}) + "\n",
-            encoding="utf-8",
-        )
-
-        ps_cmd = f'. "{common_ps}"; $r = Get-FeaturePathsEnv; Write-Output "FEATURE_DIR=$($r.FEATURE_DIR)"'
+        ps_cmd = f'. "{common_ps}"; $env:SPECIFY_FEATURE_DIRECTORY = "{custom_dir}"; $r = Get-FeaturePathsEnv; Write-Output "FEATURE_DIR=$($r.FEATURE_DIR)"'
         result = subprocess.run(
             ["pwsh", "-NoProfile", "-Command", ps_cmd],
             cwd=git_repo,
