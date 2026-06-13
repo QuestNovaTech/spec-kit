@@ -368,17 +368,13 @@ def register(app: typer.Typer) -> None:
             if script_type not in SCRIPT_TYPE_CHOICES:
                 console.print(f"[red]Error:[/red] Invalid script type '{script_type}'. Choose from: {', '.join(SCRIPT_TYPE_CHOICES.keys())}")
                 raise typer.Exit(1)
-            selected_script = script_type
+            selected_scripts = [script_type]
         else:
-            default_script = "ps" if os.name == "nt" else "sh"
-
-            if _stdin_is_interactive():
-                selected_script = select_with_arrows(SCRIPT_TYPE_CHOICES, "Choose script type (or press Enter)", default_script)
-            else:
-                selected_script = default_script
+            # Install both script types by default
+            selected_scripts = ["sh", "ps"]
 
         console.print(f"[cyan]Selected coding agent integration:[/cyan] {selected_ai}")
-        console.print(f"[cyan]Selected script type:[/cyan] {selected_script}")
+        console.print(f"[cyan]Script types:[/cyan] both sh + ps (auto-detected at runtime)")
 
         tracker = StepTracker("Initialize Specify Project")
 
@@ -386,8 +382,8 @@ def register(app: typer.Typer) -> None:
         tracker.complete("precheck", "ok")
         tracker.add("ai-select", "Select coding agent integration")
         tracker.complete("ai-select", f"{selected_ai}")
-        tracker.add("script-select", "Select script type")
-        tracker.complete("script-select", selected_script)
+        tracker.add("script-select", "Install scripts")
+        tracker.complete("script-select", "sh + ps")
 
         tracker.add("integration", "Install integration")
         tracker.add("shared-infra", "Install shared infrastructure")
@@ -426,7 +422,7 @@ def register(app: typer.Typer) -> None:
                 resolved_integration.setup(
                     project_path, manifest,
                     parsed_options=integration_parsed_options or None,
-                    script_type=selected_script,
+                    script_type=selected_scripts[0],  # Use first script type for integration setup
                     raw_options=integration_options,
                 )
                 manifest.save()
@@ -435,7 +431,7 @@ def register(app: typer.Typer) -> None:
                     {},
                     resolved_integration.key,
                     resolved_integration,
-                    script_type=selected_script,
+                    script_type=selected_scripts[0],
                     raw_options=integration_options,
                     parsed_options=integration_parsed_options or None,
                 )
@@ -449,14 +445,16 @@ def register(app: typer.Typer) -> None:
                 tracker.complete("integration", resolved_integration.config.get("name", resolved_integration.key))
 
                 tracker.start("shared-infra")
-                _install_shared_infra_or_exit(
-                    project_path,
-                    selected_script,
-                    tracker=tracker,
-                    force=force,
-                    invoke_separator=resolved_integration.effective_invoke_separator(integration_parsed_options),
-                )
-                tracker.complete("shared-infra", f"scripts ({selected_script}) + templates")
+                # Install both script types
+                for st in selected_scripts:
+                    _install_shared_infra_or_exit(
+                        project_path,
+                        st,
+                        tracker=tracker,
+                        force=force,
+                        invoke_separator=resolved_integration.effective_invoke_separator(integration_parsed_options),
+                    )
+                tracker.complete("shared-infra", "scripts (sh + ps) + templates")
 
                 ensure_constitution_from_template(project_path, tracker=tracker)
 
@@ -544,7 +542,8 @@ def register(app: typer.Typer) -> None:
                     "integration": resolved_integration.key,
                     "branch_numbering": branch_numbering or "sequential",
                     "here": here,
-                    "script": selected_script,
+                    "script": "both",
+                    "scripts": selected_scripts,
                     "speckit_version": get_speckit_version(),
                 }
                 from ..integrations.base import SkillsIntegration as _SkillsPersist
